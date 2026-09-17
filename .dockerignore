@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-web
+data
+.git
+.env
+examples
+stack
+*.md

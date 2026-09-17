@@ -1,0 +1,53 @@
+name: site-deployer-app
+
+# The deployer itself. The observability stack (cloudflared, prometheus,
+# grafana, blackbox) is a separate file:
+#   docker compose -f stack/compose.yaml --env-file .env up -d
+#
+# The shared bridge network is created by the deployer at boot, so bring this up
+# first, or run `docker network create site-deployer` once.
+
+services:
+  deployer:
+    build: .
+    image: site-deployer:local
+    restart: unless-stopped
+
+    # Host networking, deliberately. run.ts publishes each site's port on
+    # PUBLISH_HOST_IP and the health-check step then dials PROBE_HOST:hostPort.
+    # From inside a bridge-network container that loopback is the container's
+    # own, so the probe could never reach the site and every deploy would unwind
+    # at health-check. Sharing the host's network namespace makes 127.0.0.1 mean
+    # the same thing to both halves, and keeps site ports off the LAN.
+    # Linux only - see the README note for Docker Desktop.
+    network_mode: host
+
+    volumes:
+      # How it drives Docker. This is root-equivalent on the host; see below.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Bound to ./data rather than a named volume so stack/compose.yaml's
+      # default ../data/prometheus-targets mount keeps pointing at the same
+      # directory the target writer writes.
+      - ./data:/data
+      # Same .env the stack reads. config.ts loads it at module scope; the
+      # `environment:` block below wins over it, because real env vars do.
+      - ./.env:/app/.env:ro
+
+    environment:
+      DATA_DIR: /data
+      PROMETHEUS_TARGETS_DIR: /data/prometheus-targets
+      # With network_mode: host these mean what they mean on the host.
+      PUBLISH_HOST_IP: 127.0.0.1
+      PROBE_HOST: 127.0.0.1
+
+    healthcheck:
+      # /healthz is one of the two unauthenticated paths (auth/index.ts).
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:' + (process.env.PORT || 8080) + '/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
