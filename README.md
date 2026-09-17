@@ -4,17 +4,6 @@ A self-hosted deploy dashboard for a home lab. Builds a site's Docker image, run
 routes a subdomain to it through a Cloudflare Tunnel, keeps it updated from git, and
 reports traffic stats.
 
-**Status: all six phases written. Typechecks and builds clean; not yet exercised against real Docker or Cloudflare.** See *Verification*.
-
-| Phase | Scope | State |
-|---|---|---|
-| 1 | Deploy engine: source → image → container → health check → promote | **done, untested** |
-| 2 | Cloudflare: DNS records + tunnel ingress + teardown | **done, untested** |
-| 3 | React dashboard with live build logs | **done, untested** |
-| 4 | Git polling + zero-downtime swap | **done, untested** |
-| 5 | Docker-API exporter + Prometheus + Grafana + blackbox probes | **done, verified** |
-| 6 | Reconciler, encrypted secrets, Cloudflare Access | **done, untested** |
-
 ## How a deploy works
 
 Every deploy is a saga: an ordered list of steps, each with a compensating action.
