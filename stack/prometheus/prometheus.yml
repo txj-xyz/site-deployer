@@ -1,0 +1,41 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: site-deployer
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Per-container resource usage, exported by the deployer itself from the
+  # Docker API. This used to be cAdvisor, which cannot collect anything against
+  # Docker Desktop's `overlayfs` storage driver - see server/metrics/exporter.ts.
+  # The deployer already labels each series with `site` and only reports its own
+  # containers, so no relabelling is needed here.
+  #
+  # The deployer runs on the host rather than in this network; host.docker.internal
+  # is native on Docker Desktop and comes from the extra_hosts entry on Linux.
+  - job_name: site-containers
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+
+  # Availability and response time per site. Targets come from a file the
+  # deployer rewrites as sites are created and removed - file_sd picks up
+  # changes without a reload.
+  - job_name: site-probes
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/*.json
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115

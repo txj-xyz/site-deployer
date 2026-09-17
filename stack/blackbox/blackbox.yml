@@ -1,0 +1,12 @@
+modules:
+  http_2xx:
+    prober: http
+    timeout: 8s
+    http:
+      method: GET
+      # Follow redirects, and treat anything under 500 as reachable - the same
+      # rule the deploy health check uses, so the two agree about "up".
+      follow_redirects: true
+      valid_status_codes: [200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 400, 401, 403, 404]
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
