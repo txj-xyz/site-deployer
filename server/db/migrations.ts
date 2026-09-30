@@ -74,4 +74,11 @@ export const migrations: { name: string; sql: string }[] = [
       ALTER TABLE sites ADD COLUMN poll_failures INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    name: '0004_discord_embed',
+    sql: `
+      ALTER TABLE sites ADD COLUMN discord_embed_enabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sites ADD COLUMN discord_embed TEXT;
+    `,
+  },
 ]

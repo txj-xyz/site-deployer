@@ -122,7 +122,10 @@ export function openEnv(env: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(env).map(([k, v]) => [k, openValue(v)]))
 }
 
+/** What maskEnv puts in place of every value. */
+export const MASK = '••••••••'
+
 /** Keys stay visible; values never leave the process. */
 export function maskEnv(env: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.keys(env).map((k) => [k, '••••••••']))
+  return Object.fromEntries(Object.keys(env).map((k) => [k, MASK]))
 }

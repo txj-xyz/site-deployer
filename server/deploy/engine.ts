@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { and, eq, inArray } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { config, LABELS } from '../config.js'
@@ -6,6 +7,7 @@ import { deployments, sites, type DeployStatus, type Deployment, type Site } fro
 import { buildImage, imageTag } from '../docker/build.js'
 import { docker } from '../docker/client.js'
 import { detectBuild } from '../docker/detect.js'
+import { embedScriptTag } from '../discord/embed.js'
 import { createAndStart, pruneSiteImages, stopAndRemove, waitForHealthy } from '../docker/run.js'
 import { hostnameFor, originServiceFor, router } from '../cloudflare/router.js'
 import type { IngressRule } from '../cloudflare/tunnel.js'
@@ -80,9 +82,20 @@ const steps: SagaStep<Ctx>[] = [
       const detected = detectBuild(contextDir, {
         dockerfilePath: ctx.site.dockerfilePath,
         containerPort: ctx.site.containerPort,
+        genDir: join(config.generatedDir, ctx.site.name),
+        embedTag: ctx.site.discordEmbedEnabled && ctx.site.discordEmbed ? embedScriptTag(ctx.site.discordEmbed) : null,
       })
       ctx.dockerfile = detected.dockerfile
       ctx.log(`dockerfile: ${detected.dockerfile} (${detected.reason})`)
+      if (ctx.site.discordEmbedEnabled) {
+        ctx.log(
+          detected.embedInjected
+            ? 'discord embed: injected before </head> of HTML responses'
+            : !ctx.site.discordEmbed
+              ? 'warning: discord embed is enabled but no payload is saved; nothing injected'
+              : 'warning: discord embed is only injected into generated static (nginx) builds; this site serves its own HTML, so add the <script id="discord:component-embed"> tag in the app',
+        )
+      }
 
       const ref = ctx.commitSha ? ctx.commitSha.slice(0, 12) : `d-${ctx.deploymentId.slice(0, 8)}`
       const tag = imageTag(ctx.site.name, ref)
@@ -92,6 +105,7 @@ const steps: SagaStep<Ctx>[] = [
       await buildImage({
         contextDir,
         dockerfile: detected.dockerfile,
+        contexts: detected.contexts,
         tag,
         siteName: ctx.site.name,
         buildArgs: ctx.site.buildArgs,
@@ -156,24 +170,24 @@ const steps: SagaStep<Ctx>[] = [
       const hostname = hostnameFor(ctx.site)
       ctx.hostname = hostname
 
-      // The subdomain may have been edited since the last deploy. Retire the old
-      // route first, or it leaks an ingress rule and a DNS record forever.
+      // If the subdomain was edited since the last deploy, the old hostname keeps
+      // serving until promote retires it - removing it here would take the site
+      // offline for the rest of the deploy, and for good if a later step failed.
       const previous = ctx.site.hostname
-      if (previous && previous !== hostname) {
-        ctx.log(`hostname changed: ${previous} -> ${hostname}`)
-        await router.removeHostname(previous, ctx.log)
-        if (ctx.site.dnsRecordOwned) await router.removeDns(previous, ctx.site.dnsRecordId, ctx.log)
-      }
+      const sameHost = previous === hostname
+      if (previous && !sameHost) ctx.log(`hostname changing: ${previous} -> ${hostname}`)
 
       const { recordId, created } = await router.ensureDns(ctx.site, ctx.log)
       ctx.dnsCreated = created
       ctx.dnsRecordId = recordId
 
+      // Ownership and id belong to the record at `hostname`. Carrying them over
+      // from a previous hostname would mark a pre-existing record as ours to delete.
       db.update(sites)
         .set({
           hostname,
-          dnsRecordId: recordId ?? ctx.site.dnsRecordId,
-          dnsRecordOwned: created || ctx.site.dnsRecordOwned,
+          dnsRecordId: recordId ?? (sameHost ? ctx.site.dnsRecordId : null),
+          dnsRecordOwned: created || (sameHost && ctx.site.dnsRecordOwned),
           updatedAt: new Date(),
         })
         .where(eq(sites.id, ctx.site.id))
@@ -182,10 +196,18 @@ const steps: SagaStep<Ctx>[] = [
     compensate: async (ctx) => {
       // A record that already existed is not ours to delete - something else may
       // depend on it. Only undo a record this deployment created.
-      if (!ctx.dnsCreated || !ctx.hostname) return
-      await router.removeDns(ctx.hostname, ctx.dnsRecordId ?? null, ctx.log)
+      if (ctx.dnsCreated && ctx.hostname) {
+        await router.removeDns(ctx.hostname, ctx.dnsRecordId ?? null, ctx.log)
+      }
+      // Put back what the site was routed as, so the next deploy still knows which
+      // hostname to retire. ctx.site is the row as it was before this deployment.
       db.update(sites)
-        .set({ dnsRecordId: null, dnsRecordOwned: false, updatedAt: new Date() })
+        .set({
+          hostname: ctx.site.hostname,
+          dnsRecordId: ctx.site.dnsRecordId,
+          dnsRecordOwned: ctx.site.dnsRecordOwned,
+          updatedAt: new Date(),
+        })
         .where(eq(sites.id, ctx.site.id))
         .run()
     },
@@ -223,6 +245,8 @@ const steps: SagaStep<Ctx>[] = [
         setStatus(ctx.previousDeploymentId, 'superseded', { finishedAt: new Date() })
       }
 
+      await retirePreviousHostname(ctx)
+
       // Remove every other container we own for this site: the previous
       // deployment plus any orphans left by an earlier crashed deploy.
       await removeOtherContainers(ctx.site, ctx.deploymentId, ctx.log)
@@ -238,6 +262,23 @@ const steps: SagaStep<Ctx>[] = [
     },
   },
 ]
+
+/**
+ * After a subdomain edit, drops the old hostname's ingress rule and, if we created
+ * it, its DNS record. Runs once the new hostname is live. Best-effort: the new
+ * deployment is already serving, and failing here would roll back a working
+ * deploy. A leftover rule is reported by the reconciler as unclaimed.
+ */
+async function retirePreviousHostname(ctx: Ctx): Promise<void> {
+  const previous = ctx.site.hostname
+  if (!previous || previous === ctx.hostname) return
+  try {
+    await router.removeHostname(previous, ctx.log)
+    if (ctx.site.dnsRecordOwned) await router.removeDns(previous, ctx.site.dnsRecordId, ctx.log)
+  } catch (err) {
+    ctx.log(`warning: could not retire ${previous}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
 
 /** Stops and removes containers labelled for this site other than `keepDeploymentId`. */
 async function removeOtherContainers(

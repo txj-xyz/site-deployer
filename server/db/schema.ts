@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core'
+import type { DiscordEmbedPayload } from '../discord/embed.js'
 
 export const DEPLOY_STATUSES = [
   'queued',
@@ -39,6 +40,10 @@ export const sites = sqliteTable('sites', {
   buildArgs: text('build_args', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
 
   autoDeploy: integer('auto_deploy', { mode: 'boolean' }).notNull().default(true),
+  /** Inject `discordEmbed` into served HTML. Off keeps the payload so it can be toggled back on. */
+  discordEmbedEnabled: integer('discord_embed_enabled', { mode: 'boolean' }).notNull().default(false),
+  /** Discord component-embed payload (`{ component: { type: 17, ... } }`), validated on save. */
+  discordEmbed: text('discord_embed', { mode: 'json' }).$type<DiscordEmbedPayload>(),
   desiredState: text('desired_state').$type<'running' | 'stopped'>().notNull().default('running'),
   /** The deployment currently serving traffic, if any. */
   currentDeploymentId: text('current_deployment_id'),

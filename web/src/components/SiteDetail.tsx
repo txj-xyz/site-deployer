@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type Deployment, type PollOutcome } from '../api'
 import { isActive, usePoll } from '../hooks'
+import { EditSiteForm } from './EditSiteForm'
 import { LogViewer } from './LogViewer'
 import { Metrics } from './Metrics'
 import { StatusPill } from './StatusPill'
@@ -55,6 +56,7 @@ export function SiteDetail({
   const [selected, setSelected] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [checkResult, setCheckResult] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
 
   const fetcher = useCallback(() => api.getSite(siteId), [siteId])
   // Poll faster while something is in flight, then back off once it settles.
@@ -108,6 +110,19 @@ export function SiteDetail({
         <StatusPill status={selectedDeployment?.status ?? null} />
       </div>
 
+      {editing ? (
+        <EditSiteForm
+          site={site}
+          cloudflareEnabled={cloudflareEnabled}
+          onCancel={() => setEditing(false)}
+          onSaved={(deploymentId) => {
+            setEditing(false)
+            if (deploymentId) setSelected(deploymentId)
+            refresh()
+          }}
+        />
+      ) : (
+      <>
       <dl className="meta" style={{ maxWidth: 640 }}>
         <dt>Hostname</dt>
         <dd>
@@ -125,8 +140,24 @@ export function SiteDetail({
         <dd>{site.containerPort}</dd>
         <dt>Health path</dt>
         <dd>{site.healthPath}</dd>
+        {site.dockerfilePath && (
+          <>
+            <dt>Dockerfile</dt>
+            <dd>{site.dockerfilePath}</dd>
+          </>
+        )}
+        <dt>Environment</dt>
+        <dd>
+          {Object.keys(site.env).length > 0 ? (
+            Object.keys(site.env).join(', ')
+          ) : (
+            <span className="dim">none</span>
+          )}
+        </dd>
         <dt>Desired state</dt>
         <dd>{site.desiredState}</dd>
+        <dt>Discord embed</dt>
+        <dd>{site.discordEmbedEnabled ? 'on' : 'off'}</dd>
         {site.sourceType === 'git' && (
           <>
             <dt>Auto-deploy</dt>
@@ -157,6 +188,7 @@ export function SiteDetail({
         <button className="primary" onClick={() => void api.deploySite(site.id).then(refresh)}>
           Deploy
         </button>
+        <button onClick={() => setEditing(true)}>Edit</button>
         <button onClick={() => void api.stopSite(site.id).then(refresh)}>Stop</button>
         {site.sourceType === 'git' && (
           <button
@@ -180,6 +212,8 @@ export function SiteDetail({
           </button>
         )}
       </div>
+      </>
+      )}
 
       <section className="section">
         <h2>Traffic and resources</h2>

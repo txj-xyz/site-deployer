@@ -32,13 +32,22 @@ services:
       # Same .env the stack reads. config.ts loads it at module scope; the
       # `environment:` block below wins over it, because real env vars do.
       - ./.env:/app/.env:ro
+      # The host's filesystem, read-only, so a local site's localPath can be any
+      # host path; server/git/source.ts resolves it under HOST_ROOT. Read-only is
+      # recursive (submounts included) on Docker >= 25 with kernel >= 5.12. It
+      # works because nothing writes into a build context: generated Dockerfiles
+      # go to /data/generated/<site> (server/docker/detect.ts).
+      - /:/host:ro
 
     environment:
       DATA_DIR: /data
       PROMETHEUS_TARGETS_DIR: /data/prometheus-targets
-      # With network_mode: host these mean what they mean on the host.
-      PUBLISH_HOST_IP: 127.0.0.1
-      PROBE_HOST: 127.0.0.1
+      # With network_mode: host these mean what they mean on the host. Loopback
+      # by default; ORIGIN_MODE=hostport overrides both in .env with an address
+      # cloudflared can also reach (the site network's gateway).
+      PUBLISH_HOST_IP: ${PUBLISH_HOST_IP:-127.0.0.1}
+      PROBE_HOST: ${PROBE_HOST:-127.0.0.1}
+      HOST_ROOT: /host
 
     healthcheck:
       # /healthz is one of the two unauthenticated paths (auth/index.ts).

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { config } from '../config.js'
 import type { Site } from '../db/schema.js'
 import { run } from '../util/exec.js'
@@ -42,10 +42,20 @@ export async function resolveSource(
   onLog: (line: string) => void,
 ): Promise<ResolvedSource> {
   if (site.sourceType === 'local') {
-    const dir = site.localPath
-    if (!dir) throw new Error('site has sourceType "local" but no localPath')
-    if (!existsSync(dir)) throw new Error(`localPath does not exist: ${dir}`)
-    onLog(`using local path ${dir}`)
+    const hostPath = site.localPath
+    if (!hostPath) throw new Error('site has sourceType "local" but no localPath')
+    if (config.hostRoot && !isAbsolute(hostPath)) {
+      throw new Error(`localPath must be absolute when HOST_ROOT is set: ${hostPath}`)
+    }
+    const dir = config.hostRoot ? join(config.hostRoot, hostPath) : hostPath
+    if (!existsSync(dir)) {
+      throw new Error(
+        config.hostRoot
+          ? `localPath does not exist: ${hostPath} (looked for it at ${dir}; is the host root mounted at ${config.hostRoot}?)`
+          : `localPath does not exist: ${dir}`,
+      )
+    }
+    onLog(dir === hostPath ? `using local path ${dir}` : `using local path ${hostPath} (via ${dir})`)
     return { dir, sha: await headSha(dir) }
   }
 

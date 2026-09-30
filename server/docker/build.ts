@@ -1,11 +1,12 @@
-import { join } from 'node:path'
 import { config, LABELS } from '../config.js'
 import { spawnStream } from '../util/exec.js'
 
 export interface BuildOptions {
   contextDir: string
-  /** Dockerfile path relative to contextDir. */
+  /** Absolute Dockerfile path; may lie outside contextDir. */
   dockerfile: string
+  /** Extra named build contexts, passed as --build-context name=dir. */
+  contexts: Record<string, string>
   tag: string
   siteName: string
   buildArgs: Record<string, string>
@@ -28,7 +29,7 @@ export async function buildImage(o: BuildOptions): Promise<void> {
     'build',
     '--progress=plain',
     '--file',
-    join(o.contextDir, o.dockerfile),
+    o.dockerfile,
     '--tag',
     o.tag,
     '--label',
@@ -37,6 +38,9 @@ export async function buildImage(o: BuildOptions): Promise<void> {
     `${LABELS.site}=${o.siteName}`,
   ]
 
+  for (const [name, dir] of Object.entries(o.contexts)) {
+    args.push('--build-context', `${name}=${dir}`)
+  }
   for (const [key, value] of Object.entries(o.buildArgs)) {
     args.push('--build-arg', `${key}=${value}`)
   }

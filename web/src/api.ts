@@ -1,3 +1,5 @@
+import type { DiscordEmbedPayload } from './embed'
+
 export type DeployStatus =
   | 'queued'
   | 'cloning'
@@ -50,6 +52,8 @@ export interface Site {
   env: Record<string, string>
   buildArgs: Record<string, string>
   autoDeploy: boolean
+  discordEmbedEnabled: boolean
+  discordEmbed: DiscordEmbedPayload | null
   desiredState: 'running' | 'stopped'
   currentDeploymentId: string | null
   hostname: string | null
@@ -168,7 +172,26 @@ export interface CreateSiteInput {
   healthPath?: string
   env?: Record<string, string>
   autoDeploy?: boolean
+  discordEmbedEnabled?: boolean
+  discordEmbed?: DiscordEmbedPayload | null
   deployNow?: boolean
+}
+
+/** Absent fields are unchanged. In `env`, null deletes a key and omitted keys are kept. */
+export interface UpdateSiteInput {
+  subdomain?: string
+  sourceType?: 'git' | 'local'
+  repoUrl?: string | null
+  branch?: string
+  localPath?: string | null
+  dockerfilePath?: string | null
+  containerPort?: number
+  healthPath?: string
+  env?: Record<string, string | null>
+  autoDeploy?: boolean
+  discordEmbedEnabled?: boolean
+  discordEmbed?: DiscordEmbedPayload | null
+  deploy?: boolean
 }
 
 export const api = {
@@ -180,6 +203,11 @@ export const api = {
   createSite: (input: CreateSiteInput) =>
     request<Site & { deploymentId: string | null }>('/api/sites', {
       method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateSite: (id: string, input: UpdateSiteInput) =>
+    request<Site & { deploymentId: string | null }>(`/api/sites/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(input),
     }),
   deploySite: (id: string) =>
