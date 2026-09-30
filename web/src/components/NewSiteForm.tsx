@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ApiError, api, type CreateSiteInput } from '../api'
+import { DiscordEmbedField, type EmbedDraft } from './DiscordEmbedField'
 import type { JSX, FormEvent } from 'react'
 
 interface Props {
@@ -8,7 +9,7 @@ interface Props {
 }
 
 /** `KEY=value` lines to an object; blank lines and `#` comments ignored. */
-function parseEnv(text: string): { env: Record<string, string>; bad: string[] } {
+export function parseEnv(text: string): { env: Record<string, string>; bad: string[] } {
   const env: Record<string, string> = {}
   const bad: string[] = []
   for (const raw of text.split('\n')) {
@@ -36,6 +37,8 @@ export function NewSiteForm({ onCreated, onCancel }: Props): JSX.Element {
   const [healthPath, setHealthPath] = useState('/')
   const [envText, setEnvText] = useState('')
   const [deployNow, setDeployNow] = useState(true)
+  const [embedEnabled, setEmbedEnabled] = useState(false)
+  const [embed, setEmbed] = useState<EmbedDraft | null>(null)
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,6 +53,11 @@ export function NewSiteForm({ onCreated, onCancel }: Props): JSX.Element {
       return
     }
 
+    if (embedEnabled && typeof embed === 'string') {
+      setError(embed)
+      return
+    }
+
     const input: CreateSiteInput = {
       name,
       sourceType,
@@ -58,6 +66,7 @@ export function NewSiteForm({ onCreated, onCancel }: Props): JSX.Element {
       healthPath,
       env,
       deployNow,
+      ...(embedEnabled && embed && typeof embed !== 'string' ? { discordEmbedEnabled: true, discordEmbed: embed } : {}),
       ...(subdomain ? { subdomain } : {}),
       ...(dockerfilePath ? { dockerfilePath } : {}),
       ...(sourceType === 'git' ? { repoUrl } : { localPath }),
@@ -199,8 +208,16 @@ export function NewSiteForm({ onCreated, onCancel }: Props): JSX.Element {
           onChange={(e) => setEnvText(e.target.value)}
           placeholder={'NODE_ENV=production\nAPI_URL=https://example.com'}
         />
-        <span className="hint">One KEY=value per line. Stored unencrypted for now.</span>
+        <span className="hint">One KEY=value per line. Values are encrypted at rest and never shown again.</span>
       </div>
+
+      <DiscordEmbedField
+        enabled={embedEnabled}
+        value={embed}
+        siteUrl={`https://${subdomain || name || 'example'}.example.com`}
+        onEnabledChange={setEmbedEnabled}
+        onChange={setEmbed}
+      />
 
       <label className="checkbox">
         <input type="checkbox" checked={deployNow} onChange={(e) => setDeployNow(e.target.checked)} />

@@ -54,6 +54,15 @@ export const config = {
   dataDir,
   dbPath: join(dataDir, 'site-deployer.db'),
   workspacesDir: join(dataDir, 'workspaces'),
+  /** Generated Dockerfiles, one directory per site, kept out of the build context. */
+  generatedDir: join(dataDir, 'generated'),
+  /**
+   * Where the host's root filesystem is mounted when the deployer runs in a
+   * container (compose.yaml mounts it read-only at /host). A local site's
+   * localPath is a host path and is resolved under this prefix. Unset when the
+   * deployer runs directly on the host.
+   */
+  hostRoot: optional('HOST_ROOT'),
 
   dockerNetwork: str('DOCKER_NETWORK', 'site-deployer'),
   imagePrefix: str('IMAGE_PREFIX', 'sitedeployer'),

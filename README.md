@@ -36,7 +36,8 @@ Key decisions and why:
 - **Images are built without a Dockerfile when the repo has none.** Detection order:
   configured path → repo `Dockerfile` → `package.json` with a `start` script (node) →
   `package.json` with a `build` script (static build behind nginx) → bare `index.html`
-  (nginx). Generated files go in `<checkout>/.sitedeployer/`, never into the repo.
+  (nginx). Generated files go in `$DATA_DIR/generated/<site>/`, outside the build
+  context, so a source tree is never written to and can be mounted read-only.
 - **The tunnel ingress rule names the per-deployment container**, so replacing that
   one rule *is* the traffic cutover. Ingress is managed remotely via the Cloudflare
   API, so nothing reloads or restarts `cloudflared`.
@@ -104,6 +105,27 @@ PROBE_HOST=your-server.lan          # where health checks dial
 
 `PUBLISH_HOST_IP=0.0.0.0` exposes every site's port on your LAN. Set both back to
 `127.0.0.1` once the deployer runs on the server itself.
+
+### `ORIGIN_MODE=hostport`
+
+Ingress rules then point at `TUNNEL_ORIGIN_HOST:<hostPort>` instead of a container
+name, so any `cloudflared` connector on the tunnel can serve a site, not only one
+attached to `DOCKER_NETWORK`. (In `container` mode, a second connector on the host
+network produces intermittent 502s: Cloudflare balances across connectors and that
+one cannot resolve container names.) Loopback does not work here because a bridged
+`cloudflared` cannot reach the host's `127.0.0.1`. Bind on the site network's
+gateway instead, which is reachable from the bridge and the host but not the LAN:
+
+```bash
+docker network inspect site-deployer -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
+ORIGIN_MODE=hostport
+TUNNEL_ORIGIN_HOST=172.25.0.1       # that gateway; all three must match
+PUBLISH_HOST_IP=172.25.0.1
+PROBE_HOST=172.25.0.1
+```
+
+Switching modes rewrites every live site's ingress on the next reconcile, so
+redeploy each site right after restarting the deployer.
 
 ## Smoke test
 
@@ -262,6 +284,24 @@ streams over SSE. Three details that matter in use:
 
 Routing is a ~20-line hash router (`#/`, `#/sites/:id`) rather than a dependency.
 
+## Discord link embeds
+
+A site can carry a [Discord component embed](https://discord-anthony-embed-unfurl-components.mintlify.site/developers/link-previews/component-embeds):
+a Components V2 payload Discord shows in place of the Open Graph unfurl. Turn on
+**Discord link embed** in the create or edit form and build it in the visual editor:
+a Discord-styled preview where you click a block to edit it (text is edited in place as
+markdown), add, reorder, duplicate or delete blocks, and see live component, gallery and
+byte counts against the limits. A JSON tab edits the raw payload. The payload is validated on save against Discord's rules — Container root,
+at most 40 components and 10 gallery items, 3,000 bytes, link buttons only, no unknown
+keys — and stored as `sites.discord_embed`; the toggle is `discord_embed_enabled`.
+
+On the next deploy, the generated nginx config injects
+`<script id="discord:component-embed" type="application/json">` before `</head>` with
+`sub_filter`. `<`, `>`, `&`, `$` and `'` are written as JSON `\u` escapes so the payload
+can neither close the script tag nor be read as an nginx variable. Only sites served by
+a generated static build get the tag; a site with its own Dockerfile or `start` script
+renders its own HTML, and the deploy log says so instead of injecting.
+
 ## API
 
 | Method | Path | Notes |
@@ -339,5 +379,8 @@ The first real test is the smoke test below, which needs only Docker — no Clou
   dashboard during a deploy can still lose an update.
 - No per-site HTTP request counts or status codes — see *Metrics* above for why.
 - Prometheus and Grafana have no authentication of their own; they bind to loopback.
+- Discord embeds are injected only into generated static (nginx) builds, and only into
+  pages that have a `</head>`. The injected tag has been checked in nginx; it has not yet
+  been unfurled by Discord itself.
 - Build concurrency is unbounded across sites. Ten sites deploying at once means ten
   simultaneous `docker build` processes.

@@ -19,14 +19,17 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     networks:
       - site-deployer
+    # /ready is 200 only while at least one connection to Cloudflare's edge is
+    # registered, so "healthy" means the tunnel is actually serving.
     healthcheck:
-      test: ['CMD', 'cloudflared', '--version']
-      interval: 60s
+      test: ['CMD', 'cloudflared', 'tunnel', '--metrics', '127.0.0.1:20241', 'ready']
+      interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 20s
 
   # Probes each site over HTTP. Joined to the site network so it can reach
   # containers by name, which works whether or not Cloudflare is configured.
